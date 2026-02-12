@@ -17,7 +17,7 @@ st.set_page_config(
 st.title("🎯 Immuno-PET Tracer Rational Design Tool")
 st.markdown(f"""
 **Focus:** PD-L1 Checkpoint Imaging Optimization  
-**Reference Tracer:** $^{{89}}$Zr-DFO-Atezolizumab ($K_d \approx {ATEZO_KD}$ nM)
+**Reference Tracer:** $^{{89}}$Zr-DFO-Atezolizumab ($K_d \sim {ATEZO_KD}$ nM)")
 ---
 """)
 
