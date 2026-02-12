@@ -4,22 +4,24 @@ import plotly.graph_objects as go
 
 # --- SCIENTIFIC CONSTANTS ---
 ZR89_HALFLIFE = 78.41  # Hours (Zirconium-89)
+ATEZO_KD = 0.43        # nM (Reference Antibody Blocker)
+WL12_KD = 25.0         # nM (Chatterjee Peptide Kd)
 
 TRACER_LIBRARY = {
+    "WL12 (Chatterjee Peptide)": {
+        "kd_nm": 25.0,
+        "molecular_weight_kda": 1.5,
+        "note": "Optimized peptide for PD-L1; fast clearance.",
+    },
     "Atezolizumab (Antibody)": {
         "kd_nm": 0.43,
         "molecular_weight_kda": 145,
-        "note": "Reference clinical immuno-PET antibody tracer",
+        "note": "Reference clinical immuno-PET antibody tracer.",
     },
     "PD-L1 Nanobody": {
         "kd_nm": 2.10,
         "molecular_weight_kda": 15,
-        "note": "Small biologic with fast kinetics and lower MW",
-    },
-    "PD-L1 Small Molecule": {
-        "kd_nm": 12.00,
-        "molecular_weight_kda": 0.8,
-        "note": "Fast distribution; generally lower affinity than antibodies",
+        "note": "Small biologic with fast kinetics.",
     },
 }
 
@@ -33,8 +35,8 @@ st.set_page_config(
 st.title("🎯 Immuno-PET Tracer Rational Design Tool")
 st.markdown(
     """
-**Focus:** PD-L1 Checkpoint Imaging Optimization  
-Use mechanistic affinity + occupancy + radioactive decay for protocol tuning.
+**Advanced Predictive Modeling:** PD-L1 Checkpoint Imaging & Target Engagement  
+*Integrating Mechanistic Binding, Competitive Inhibition, and Pharmacokinetic Sink Effects.*
 ---
 """
 )
@@ -44,9 +46,9 @@ st.sidebar.header("🧪 Experimental Parameters")
 
 st.sidebar.subheader("Tracer Library")
 selected_tracer = st.sidebar.selectbox(
-    "Tracer Type",
+    "Select Tracer for Simulation",
     options=list(TRACER_LIBRARY.keys()),
-    help="Choose tracer class to update affinity (Kd) and molecular weight assumptions.",
+    help="Updates affinity (Kd) and MW assumptions based on tracer class.",
 )
 
 active_tracer = TRACER_LIBRARY[selected_tracer]
@@ -65,7 +67,6 @@ b_max = st.sidebar.slider(
     min_value=10,
     max_value=500,
     value=150,
-    help="Target density of PD-L1 receptors in tumor tissue.",
 )
 
 uncertainty_pct = st.sidebar.slider(
@@ -73,48 +74,58 @@ uncertainty_pct = st.sidebar.slider(
     min_value=0,
     max_value=50,
     value=20,
-    help="Creates a confidence band (shaded area) around the binding prediction.",
+    help="Confidence band for biological variability.",
 )
 
-st.sidebar.subheader("Radiochemistry")
-spec_act = st.sidebar.number_input(
-    "Specific Activity [MBq/nmol]",
-    value=100.0,
-    min_value=1.0,
-    help="Radioactivity per unit of tracer mass.",
+# --- CHATTERJEE SPECIFIC INPUTS ---
+st.sidebar.subheader("Competitive Environment")
+ab_blocker_conc = st.sidebar.slider(
+    "Therapeutic Antibody Blocker [nM]",
+    0.0, 20.0, 0.0,
+    help="Simulates a patient already on antibody therapy (e.g., Atezolizumab)."
 )
 
-injected_dose_nm = st.sidebar.slider("Planned Tracer Conc. [nM]", 0.1, 10.0, 2.0)
-
-st.sidebar.subheader("Imaging Logistics")
-time_post_injection_h = st.sidebar.slider(
-    "Time Post-Injection [hours]",
-    min_value=0,
-    max_value=120,
-    value=48,
-    help="Radioactive signal decays over time using Zr-89 half-life.",
+st.sidebar.subheader("Pharmacokinetics (The Sink)")
+liver_sink = st.sidebar.slider(
+    "Liver/Kidney Sequestration [%]",
+    0, 90, 20,
+    help="Percentage of dose lost to off-target organs (The 'Sink Effect')."
 )
 
-# --- MODEL (MATH) ---
-conc_range = np.linspace(0, 10, 200)
+st.sidebar.subheader("Radiochemistry & Timing")
+spec_act = st.sidebar.number_input("Specific Activity [MBq/nmol]", value=100.0)
+injected_dose_nm = st.sidebar.slider("Planned Tracer Injection [nM]", 0.1, 50.0, 5.0)
+time_h = st.sidebar.slider("Time Post-Injection [hours]", 0, 120, 24)
 
-# Central estimate
-specific_binding = (b_max * conc_range) / (active_kd + conc_range)
-current_binding = (b_max * injected_dose_nm) / (active_kd + injected_dose_nm)
+# --- MODEL MATH (INTEGRATED LOGIC) ---
 
-# Uncertainty band from Bmax variance
-bmax_low = b_max * (1 - uncertainty_pct / 100)
-bmax_high = b_max * (1 + uncertainty_pct / 100)
-specific_binding_low = (bmax_low * conc_range) / (active_kd + conc_range)
-specific_binding_high = (bmax_high * conc_range) / (active_kd + conc_range)
+# 1. Apply Sink Effect to injected dose
+effective_conc = injected_dose_nm * (1 - (liver_sink / 100))
+conc_range = np.linspace(0.1, 50, 200)
+effective_range = conc_range * (1 - (liver_sink / 100))
 
-# Signal conversion and decay
-initial_signal_mbq_mg = (current_binding / 1_000_000) * spec_act
+# 2. Competitive Binding Equation (The core scientific novelty)
+# Kd_app = Kd * (1 + [Blocker]/Kd_blocker)
+kd_apparent = active_kd * (1 + (ab_blocker_conc / ATEZO_KD))
+
+def calc_binding(c, bmax_val, kd_app):
+    return (bmax_val * c) / (kd_app + c)
+
+# Central, High, and Low estimates
+specific_binding = calc_binding(effective_range, b_max, kd_apparent)
+b_low, b_high = b_max * (1 - uncertainty_pct/100), b_max * (1 + uncertainty_pct/100)
+binding_low = calc_binding(effective_range, b_low, kd_apparent)
+binding_high = calc_binding(effective_range, b_high, kd_apparent)
+
+# Current point calculation
+current_binding = calc_binding(effective_conc, b_max, kd_apparent)
+occupancy = (effective_conc / (kd_apparent + effective_conc)) * 100
+
+# 3. Radioactive Decay
 decay_constant = np.log(2) / ZR89_HALFLIFE
-remaining_fraction = np.exp(-decay_constant * time_post_injection_h)
-decayed_signal_mbq_mg = initial_signal_mbq_mg * remaining_fraction
-
-occupancy = (injected_dose_nm / (active_kd + injected_dose_nm)) * 100
+remaining_frac = np.exp(-decay_constant * time_h)
+initial_signal = (current_binding / 1_000_000) * spec_act
+decayed_signal = initial_signal * remaining_frac
 
 # --- VISUALIZATION ---
 col1, col2 = st.columns([3, 1])
@@ -122,95 +133,56 @@ col1, col2 = st.columns([3, 1])
 with col1:
     fig = go.Figure()
 
-    # Lower bound first
-    fig.add_trace(
-        go.Scatter(
-            x=conc_range,
-            y=specific_binding_low,
-            mode="lines",
-            line=dict(width=0),
-            showlegend=False,
-            hoverinfo="skip",
-            name="Lower Uncertainty Bound",
-        )
-    )
+    # Uncertainty Band
+    fig.add_trace(go.Scatter(x=conc_range, y=binding_low, mode="lines", line=dict(width=0), showlegend=False))
+    fig.add_trace(go.Scatter(
+        x=conc_range, y=binding_high, mode="lines", line=dict(width=0),
+        fill="tonexty", fillcolor="rgba(255, 75, 75, 0.2)",
+        name=f"Uncertainty (±{uncertainty_pct}% Bmax)"
+    ))
 
-    # Upper bound with fill to previous trace
-    fig.add_trace(
-        go.Scatter(
-            x=conc_range,
-            y=specific_binding_high,
-            mode="lines",
-            line=dict(width=0),
-            fill="tonexty",
-            fillcolor="rgba(255, 75, 75, 0.20)",
-            name=f"Uncertainty Band (±{uncertainty_pct}% Bmax)",
-        )
-    )
+    # Binding Curve
+    fig.add_trace(go.Scatter(
+        x=conc_range, y=specific_binding,
+        mode="lines", name=f"{selected_tracer} Binding",
+        line=dict(color="#FF4B4B", width=4)
+    ))
 
-    # Central estimate
-    fig.add_trace(
-        go.Scatter(
-            x=conc_range,
-            y=specific_binding,
-            mode="lines",
-            name="Specific Binding (central estimate)",
-            line=dict(color="#FF4B4B", width=4),
-        )
-    )
-
-    # Operating point
-    fig.add_trace(
-        go.Scatter(
-            x=[injected_dose_nm],
-            y=[current_binding],
-            mode="markers",
-            name="Planned Dose",
-            marker=dict(color="black", size=12, symbol="cross"),
-        )
-    )
-
-    # Kd reference
-    fig.add_vline(
-        x=active_kd,
-        line_dash="dash",
-        line_color="green",
-        annotation_text=f"Kd ({active_kd} nM)",
-    )
+    # Operating Point
+    fig.add_trace(go.Scatter(
+        x=[injected_dose_nm], y=[current_binding],
+        mode="markers", name="Operating Point",
+        marker=dict(color="black", size=12, symbol="cross")
+    ))
 
     fig.update_layout(
-        title="<b>Tracer Binding Saturation Profile with Uncertainty</b>",
-        xaxis_title="Tracer Concentration [nM]",
+        title=f"<b>Binding Profile: {selected_tracer}</b><br><sup>Effect of {liver_sink}% Sink & {ab_blocker_conc}nM Blocker</sup>",
+        xaxis_title="Injected Concentration [nM]",
         yaxis_title="Bound Fraction [fmol/mg]",
-        hovermode="x unified",
-        template="plotly_white",
-        height=520,
+        template="plotly_white", height=550
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 with col2:
-    st.metric("Tracer", selected_tracer)
+    st.metric("Effective Delivery", f"{effective_conc:.2f} nM", delta=f"-{liver_sink}% Sink")
     st.metric("Predicted Binding", f"{current_binding:.2f} fmol/mg")
-    st.metric("Signal @ Injection", f"{initial_signal_mbq_mg:.6f} MBq/mg")
-    st.metric(
-        f"Signal @ {time_post_injection_h}h",
-        f"{decayed_signal_mbq_mg:.6f} MBq/mg",
-        delta=f"{(remaining_fraction * 100):.1f}% remaining",
-    )
-
-    st.progress(occupancy / 100)
+    st.metric(f"Signal @ {time_h}h", f"{decayed_signal:.6f} MBq/mg")
+    
     st.write(f"**Receptor Occupancy:** {occupancy:.1f}%")
+    st.progress(min(occupancy/100, 1.0))
+    
+    if ab_blocker_conc > 0:
+        st.warning(f"Kd shifted to {kd_apparent:.2f} nM due to competition.")
 
 # --- SCIENTIFIC JUSTIFICATION ---
-st.markdown("### 🧠 Scientific Rationale")
+st.markdown("### 🧠 Multi-Factor Validation Logic")
 st.success(
     f"""
-**Validation Logic:**
-1. **Affinity Matching:** Active tracer selection updates model affinity using tracer-specific $K_d$ values.
-2. **Uncertainty Awareness:** A shaded confidence band (±{uncertainty_pct}% on Bmax) captures biological variability.
-3. **Time-Resolved Logistics:** Radioactive decay is explicitly modeled using $N(t)=N_0e^{{-\\lambda t}}$ and Zr-89 half-life ({ZR89_HALFLIFE} h).
-4. **Translational Utility:** Dose, occupancy, and practical scan timing can be tuned together to find a realistic imaging sweet spot.
+1. **Competitive Engagement:** Uses the Cheng-Prusoff derived model to calculate $K_{{d,app}}$ when therapeutic antibodies are present.
+2. **Pharmacokinetic Sink:** Accounts for the liver/kidney sequestration identified in WL12 biodistribution studies.
+3. **Uncertainty Propagation:** Shaded regions represent the impact of heterogeneous PD-L1 expression ($B_{{max}}$) on signal reliability.
+4. **Isotope Decay:** Real-time signal attenuation based on $^{{89}}$Zr kinetics ($T_{{1/2}} = 78.41$h).
 """
 )
 
-st.caption("Developed for: Theranostic Imaging & Immuno-Oncology Research Applications")
+st.caption("Developed for: Chatterjee Lab & Translational Immuno-Oncology Research")
