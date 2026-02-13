@@ -61,7 +61,7 @@ active_kd = active_tracer["kd_nm"]
 active_mw = active_tracer["molecular_weight_kda"]
 
 st.sidebar.info(
-    f"**Selected Kd/Ki:** {active_kd} nM\n\n"
+    f"**Selected Ki (WL12):** {active_kd} nM (FRET inhibition assay, Lesniak 2019)\n\n"
     f"**Molecular Weight:** {active_mw} kDa\n\n"
     f"{active_tracer['note']}"
 )
